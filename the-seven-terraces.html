@@ -193,7 +193,7 @@ body {
   display: grid;
   grid-template-columns: 1fr 11rem 1fr;
   gap: 1rem;
-  align-items: start;
+  align-items: stretch;
 }
 
 @media (max-width: 720px) {
@@ -204,10 +204,12 @@ body {
 }
 
 .side {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
   padding-top: 0.3rem;
+  padding-bottom: 11rem;
 }
 
 .side-lbl {
@@ -230,13 +232,15 @@ body {
   font-weight: 600;
 }
 
-/* Packet stack */
+/* Packet stack — pinned to the floor of .side, same offset on both columns */
 .packet-stack {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   gap: 2px;
-  margin-top: 0.3rem;
-  min-height: 1.6rem;
 }
 
 .packet-band {
@@ -248,35 +252,55 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: opacity 0.2s, border-color 0.2s, background-color 0.2s, color 0.2s;
 }
 
-.packet-band.new {
+/* Layer present and freshly added at this terrace (descending) */
+.packet-band.added {
   border: 1px solid var(--blue);
   background: var(--blue-dim);
   color: var(--blue);
   font-weight: 700;
 }
-.packet-band.old {
+/* Layer present, added at an earlier (lower) terrace — already wrapped */
+.packet-band.wrapped {
   border: 1px solid var(--border2);
   background: var(--bg);
   color: var(--dim);
 }
-.packet-band.payload {
-  border: 1px dashed var(--faint);
+/* Layer not built yet at this point in the descent — reserved empty slot */
+.packet-band.not-yet {
+  border: 1px dashed var(--border2);
   background: transparent;
   color: var(--faint);
-  font-style: italic;
+  opacity: 0.35;
 }
+/* Layer just stripped at this terrace (ascending) */
 .packet-band.stripped {
   border: 1px solid var(--green);
   background: var(--green-dim);
   color: var(--green);
   font-weight: 700;
 }
+/* Layer already stripped at an earlier (higher) terrace — gone, reserved slot */
+.packet-band.gone {
+  border: 1px dashed var(--border2);
+  background: transparent;
+  color: var(--faint);
+  opacity: 0.35;
+}
+/* Layer still wrapped, waiting to be stripped further up */
 .packet-band.remaining {
   border: 1px solid var(--border2);
   background: var(--bg);
   color: var(--dim);
+}
+/* The payload itself — always at the very bottom of the stack */
+.packet-band.payload {
+  border: 1px dashed var(--faint);
+  background: transparent;
+  color: var(--faint);
+  font-style: italic;
 }
 
 /* Center gutter — the sin */
@@ -346,112 +370,116 @@ body {
 
 <div class="footer-note">
   Click a terrace to open it. Only one terrace stays open at a time — the mountain narrows as you climb,
-  same as the pilgrim's path. <b>Terraces 5, 6, and 7</b> share a single landing: in real-world stacks the Session,
-  Presentation, and Application layers rarely separate cleanly, so they are climbed together here.
+  same as the pilgrim's path. <b>Terraces V and VI</b> share a single landing: in real-world stacks the Session
+  and Presentation layers rarely separate cleanly, so they are climbed together here. <b>Terrace VII (Application)</b>
+  stands alone at the summit — it carries the one thing that genuinely varies request to request, even within the
+  same session, such as each open tab in a browser.
 </div>
 
 <script>
 const TERRACES = [
   {
+    level: 1,
     num: 'Terrace I', osi: 'Layer 1 — Physical',
     name: 'The Open Wire',
     sinPreview: 'Trusts that the medium has only one listener',
     descLbl: 'Descending — the sender adds',
     descText: 'Bits are encoded onto the medium — voltage levels, light pulses, or radio signal. <b>The transmitter has no way of knowing what else is connected to that medium.</b>',
-    descPacket: [
-      { cls: 'new', label: '— raw signal on the wire —' },
-      { cls: 'payload', label: '[ frame bits ]' },
-    ],
     ascLbl: 'Ascending — the receiver checks',
     ascText: 'The receiver\'s NIC detects signal and recovers bit timing and synchronization — <b>but so could anything else physically attached to the medium.</b> A tap or splice on the cable, a radio receiver in range, a compromised hub — all see the same signal a legitimate receiver does.',
-    ascPacket: [
-      { cls: 'stripped', label: 'signal recovered → bits' },
-      { cls: 'remaining', label: '[ frame bits remain ]' },
-    ],
     sin: 'The physical medium trusts that only the intended sender and receiver are present on it. In reality the medium has no concept of "intended" at all — it carries the signal to whatever is physically connected, whether that\'s one device or several.'
   },
   {
+    level: 2,
     num: 'Terrace II', osi: 'Layer 2 — Data Link',
     name: 'The Self-Declared Name',
     sinPreview: 'Trusts the source MAC as self-reported truth',
     descLbl: 'Descending — the sender adds',
     descText: 'Wraps the frame in an <b>Ethernet header</b> — source MAC, destination MAC, EtherType.',
-    descPacket: [
-      { cls: 'new', label: 'Ethernet header (src/dst MAC)' },
-      { cls: 'old', label: '[ raw signal ]' },
-      { cls: 'payload', label: '[ frame bits ]' },
-    ],
     ascLbl: 'Ascending — the receiver checks',
     ascText: 'Receiver reads the destination MAC to decide "is this frame mine," and may check a frame checksum (FCS) for corruption — <b>but never authenticates the source MAC.</b>',
-    ascPacket: [
-      { cls: 'stripped', label: 'Ethernet header stripped' },
-      { cls: 'remaining', label: '[ payload continues up ]' },
-    ],
     sin: 'Data Link trusts the source MAC address as self-reported truth — nothing on the wire verifies that a frame actually came from the MAC it claims. This is the seam ARP poisoning lives in.'
   },
   {
+    level: 3,
     num: 'Terrace III', osi: 'Layer 3 — Network',
     name: 'The Envelope, Not the Passport',
     sinPreview: 'Trusts the source IP as a self-declared address',
     descLbl: 'Descending — the sender adds',
     descText: 'Wraps the segment in an <b>IP header</b> — source IP, destination IP, TTL, protocol field.',
-    descPacket: [
-      { cls: 'new', label: 'IP header (src/dst IP, TTL)' },
-      { cls: 'old', label: '[ Ethernet header ]' },
-      { cls: 'payload', label: '[ segment ]' },
-    ],
     ascLbl: 'Ascending — the receiver checks',
     ascText: 'Receiver checks that TTL hasn\'t expired and validates the header checksum — <b>but the source IP is taken at face value.</b>',
-    ascPacket: [
-      { cls: 'stripped', label: 'IP header stripped' },
-      { cls: 'remaining', label: '[ segment continues up ]' },
-    ],
     sin: 'Network layer trusts the source IP as a self-declared return address — like an envelope, not a passport. Nothing requires the sender to prove that address is really theirs. This is the seam IP spoofing and BGP hijacking live in.'
   },
   {
+    level: 4,
     num: 'Terrace IV', osi: 'Layer 4 — Transport',
     name: 'The Predictable Handshake',
     sinPreview: 'Trusts whoever can see the sequence numbers',
     descLbl: 'Descending — the sender adds',
     descText: 'Wraps the data in a <b>TCP or UDP header</b> — source port, destination port, sequence number (TCP), checksum.',
-    descPacket: [
-      { cls: 'new', label: 'TCP/UDP header (ports, seq#)' },
-      { cls: 'old', label: '[ IP header ]' },
-      { cls: 'payload', label: '[ application data ]' },
-    ],
     ascLbl: 'Ascending — the receiver checks',
     ascText: 'For TCP, the receiver checks that sequence and acknowledgment numbers fall within the expected window, and validates the checksum. <b>For UDP, there isn\'t even a handshake or sequence check</b> — packets are accepted on arrival with no ordering guarantee at all.',
-    ascPacket: [
-      { cls: 'stripped', label: 'TCP/UDP header stripped' },
-      { cls: 'remaining', label: '[ application data continues up ]' },
-    ],
     sin: 'Transport layer trusts that whoever can see the SYN-ACK exchange — or just send a UDP packet — is a legitimate participant in the conversation. Sequence numbers were designed to keep streams in order, not to authenticate identity. If an attacker can predict or observe them, the "trusted" session can be hijacked or injected into.'
   },
   {
-    num: 'Terraces V · VI · VII', osi: 'Layers 5–7 — Session, Presentation, Application',
-    name: 'The Shared Landing',
+    level: 6,
+    num: 'Terrace V · VI', osi: 'Layers 5–6 — Session, Presentation',
+    name: 'The Borrowed Key',
+    sinPreview: 'Trusts whoever holds the session token',
+    descLbl: 'Descending — the sender adds',
+    descText: 'Establishes which logical conversation this exchange belongs to (<b>Session</b> — tracking state across requests, like a login or a browser tab\'s connection) and formats the data for transport (<b>Presentation</b> — encoding, compression, encryption such as TLS). This terrace governs how the conversation is carried, not what it\'s carrying.',
+    ascLbl: 'Ascending — the receiver checks',
+    ascText: 'The receiver associates incoming data with the correct session (matching a session ID, cookie, or TLS session ticket) and reverses the encoding or decryption to recover the original formatting. <b>It checks that this data belongs to a session — not that the session itself is legitimate</b> or that the party using it is who they claim to be.',
+    sin: 'This terrace trusts that possession of a session token or TLS session ticket is equivalent to being the rightful owner of that session. If a session ID can be stolen, predicted, or replayed, the receiver has no way to tell the difference between the real participant and someone holding a copy of their credentials.'
+  },
+  {
+    level: 7,
+    num: 'Terrace VII', osi: 'Layer 7 — Application',
+    name: 'The Summit',
     sinPreview: 'Trusts that someone above will finally check',
     descLbl: 'Descending — the sender adds',
-    descText: 'In practice these three rarely separate cleanly. The application formats its data (<b>Presentation</b> — encoding, encryption like TLS), may track a logical session (<b>Session</b> — login state, cookies), and produces the actual request or message (<b>Application</b> — HTTP, DNS, SMTP, and so on). Most real stacks treat this as one combined step.',
-    descPacket: [
-      { cls: 'new', label: 'Application message (HTTP/DNS/etc.)' },
-      { cls: 'new', label: 'session + presentation framing' },
-      { cls: 'old', label: '[ TCP/UDP header ]' },
-    ],
+    descText: 'Produces the actual content of the exchange — the HTTP request, the DNS query, the SMTP message, the specific page or data a browser tab is asking for. <b>This is where the real, variable payload lives</b> — different for every tab, every request, every message, even within the same session.',
     ascLbl: 'Ascending — the receiver checks',
-    ascText: 'The application is generally responsible for validating <b>its own</b> data — checking credentials, parsing input safely, verifying a session token. Nothing below this terrace does it for you.',
-    ascPacket: [
-      { cls: 'stripped', label: 'application parses message' },
-      { cls: 'remaining', label: '[ delivered to the program ]' },
-    ],
-    sin: 'Everything below this terrace has been quietly assuming someone above will eventually check identity and intent. The Application landing is where that assumption finally comes due — and where the most varied, least standardized security practices live, because every application decides for itself how seriously to take that responsibility.'
+    ascText: 'The application is solely responsible for validating <b>its own</b> content — checking credentials, parsing input safely, verifying that a request makes sense in context. Nothing below this terrace inspects what\'s actually being asked for or sent.',
+    sin: 'Every terrace below has been quietly assuming someone above will eventually check identity and intent. The Application terrace is where that assumption finally comes due — and it\'s also where the most varied, least standardized security practices live, because every application decides for itself how seriously to take that responsibility.'
   },
 ];
+
+const LAYER_NAMES = {
+  1: 'Physical — raw signal',
+  2: 'Data Link — Ethernet header',
+  3: 'Network — IP header',
+  4: 'Transport — TCP/UDP header',
+  6: 'Session · Presentation',
+  7: 'Application — the payload',
+};
+const LAYER_ORDER = [7, 6, 4, 3, 2, 1];
 
 TERRACES.reverse();
 
 const mountain = document.getElementById('mountain');
 let openIndex = null;
+
+function buildDescStack(terraceLevel) {
+  return LAYER_ORDER.map(layer => {
+    let cls;
+    if (layer === terraceLevel) cls = 'added';
+    else if (layer > terraceLevel) cls = 'not-yet';
+    else cls = 'wrapped';
+    return { cls, label: LAYER_NAMES[layer] };
+  });
+}
+
+function buildAscStack(terraceLevel) {
+  return LAYER_ORDER.map(layer => {
+    let cls;
+    if (layer === terraceLevel) cls = 'stripped';
+    else if (layer > terraceLevel) cls = 'gone';
+    else cls = 'remaining';
+    return { cls, label: LAYER_NAMES[layer] };
+  });
+}
 
 function packetHTML(bands) {
   return '<div class="packet-stack">' +
@@ -462,7 +490,8 @@ function packetHTML(bands) {
 function render() {
   mountain.innerHTML = '';
   TERRACES.forEach((t, i) => {
-    const widthPct = 84 + i * 4;
+    const steps = TERRACES.length - 1;
+    const widthPct = 76 + (i / steps) * 24;
     const el = document.createElement('div');
     el.className = 'terrace' + (openIndex === i ? ' open' : '');
     el.style.width = widthPct + '%';
@@ -482,7 +511,7 @@ function render() {
           <div class="side">
             <div class="side-lbl desc">${t.descLbl}</div>
             <div class="side-text">${t.descText}</div>
-            ${packetHTML(t.descPacket)}
+            ${packetHTML(buildDescStack(t.level))}
           </div>
           <div class="gutter">
             <div class="gutter-lbl">The Sin</div>
@@ -493,7 +522,7 @@ function render() {
           <div class="side">
             <div class="side-lbl asc">${t.ascLbl}</div>
             <div class="side-text">${t.ascText}</div>
-            ${packetHTML(t.ascPacket)}
+            ${packetHTML(buildAscStack(t.level))}
           </div>
         </div>
       </div>
